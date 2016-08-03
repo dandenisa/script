@@ -13,19 +13,20 @@ import (
 )
 
 const (
-	URL         = "ec2-52-37-174-113.us-west-2.compute.amazonaws.com"
-	PROTOCOL    = "http://"
-	LOCALHOST   = "localhost"
-	PORT_NAME   = "8082"
-	AUTHPATH    = "/auth/login"
-	ACCOUNTPATH = "/api/accounts"
-	PROJECTPATH = "/api/projects"
-	USERNAME    = "admin"
-	PASSWORD    = "shipyard"
+	URL          = "ec2-52-37-174-113.us-west-2.compute.amazonaws.com"
+	PROTOCOL     = "http://"
+	LOCALHOST    = "localhost"
+	PORT_NAME    = "8082"
+	AUTHPATH     = "/auth/login"
+	ACCOUNTPATH  = "/api/accounts"
+	PROJECTPATH  = "/api/projects"
+	REGISTRYPATH = "/api/registries"
+	USERNAME     = "admin"
+	PASSWORD     = "shipyard"
 )
 
 func setUrl() string {
-	url := PROTOCOL + URL + ":" + PORT_NAME
+	url := PROTOCOL + LOCALHOST + ":" + PORT_NAME
 	return url
 }
 
@@ -41,14 +42,15 @@ type ScriptId struct {
 	Id string `json:"id"`
 }
 type SenderStatistics struct {
-	Username   string
-	Images     []ScriptImageDetails
-	Accounts   []ScriptAccounts
-	Projects   []ScriptProjects
-	Builds     []ScriptBuilds
-	Registries []ScriptRegistries
-	Tests      []ScriptTests
-	Results    []ScriptBuildResults
+	Username     string
+	Images       []ScriptImageDetails
+	Accounts     []ScriptAccounts
+	Projects     []ScriptProjects
+	Builds       []ScriptBuilds
+	Registries   []ScriptRegistries
+	Tests        []ScriptTests
+	Results      []ScriptBuildResults
+	Repositories []ScriptRepository
 }
 
 type ScriptBuilds struct {
@@ -70,38 +72,65 @@ type ScriptProjects struct {
 	CreationTime string
 	LastRunTime  string
 	Status       string
+	Images       []*ScriptImageDetails
+	Tests        []*ScriptTests
 }
 
 type ScriptAccounts struct {
-	Id        string   `json:"id"`
-	FirstName string   `json:"first_name"`
-	LastName  string   `json:"last_name"`
-	Username  string   `json:"username"`
-	Password  string   `json:"password"`
-	Roles     []string `json:"roles"`
+	Id        string
+	FirstName string
+	LastName  string
+	Username  string
+	Password  string
+	Roles     []string
 }
 
 type ScriptImageDetails struct {
-	Id          string `json:"id"`
-	Name        string `json:"name"`
-	ImageId     string `json:"imageId"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
-	RegistryId  string `json:"registryId"`
+	Id             string
+	Name           string
+	ImageId        string
+	Description    string
+	Status         string
+	RegistryId     string
+	Tag            string
+	IlmTags        []string
+	Location       string
+	SkipImageBuild string
 
-	Location       string `json:"location"`
-	SkipImageBuild string `json:"skipImageBuild"`
-
-	ProjectId string `json:"projectId"`
+	ProjectId string
 }
 
+type ScriptRepository struct {
+	Name         string
+	Tag          string
+	FsLayers     []FsLayer
+	Signatures   []Signature
+	HasProblems  bool
+	Message      string
+	RegistryUrl  string
+	RegistryName string
+}
+
+type FsLayer struct {
+	BlobSum string
+}
+type Signature struct {
+	Header    Header
+	Signature string
+	Protected string
+}
+
+type Header struct {
+	Algorithm string
+}
 type ScriptRegistries struct {
+	Id   string
 	Name string
 	Addr string
 }
 type ScriptTests struct {
-	Id        string `json:"id"`
-	ProjectId string `json:"projectId"`
+	Id        string
+	ProjectId string
 	Provider  Provider
 }
 type Provider struct {
@@ -171,7 +200,6 @@ func getAuthToken() string {
 
 	body := postAuthentication()
 	s, _ := parseAuthResponse(body)
-	//fmt.Println("1", string(s))
 	x := string(s)
 	return x
 }
@@ -202,13 +230,6 @@ func unmarshalAccounts(body []byte) []ScriptAccounts {
 		fmt.Println("error:", error)
 	}
 	return accountInfo
-}
-func unmarshalRegistries(body []byte) []ScriptRegistries {
-	error := json.Unmarshal(body, &registryInfo)
-	if error != nil {
-		fmt.Println("error:", error)
-	}
-	return registryInfo
 }
 
 func getProjectsfromApi() []byte {
@@ -242,7 +263,6 @@ func getImagesfromApi() []ScriptImageDetails {
 	s := getIdList(body)
 	for _, data := range s {
 		projId := url + data.Id + "/images"
-
 		client := &http.Client{}
 		req, err := http.NewRequest("GET", projId, nil)
 		req.Header.Add("X-Access-Token", token)
@@ -260,10 +280,6 @@ func getImagesfromApi() []ScriptImageDetails {
 			}
 		}
 	}
-	/*for i := 0; i < len(result); i++ {
-
-		fmt.Printf("this is the result: %d,%v\n", i, result[i])
-	}*/
 	return result
 }
 func getTestsFromApi() []ScriptTests {
@@ -272,12 +288,11 @@ func getTestsFromApi() []ScriptTests {
 
 	token = USERNAME + ":" + getAuthToken()
 	url := setUrl() + PROJECTPATH + "/"
-
 	body := getProjectsfromApi()
 	s := getIdList(body)
+
 	for _, data := range s {
 		projId := url + data.Id + "/tests"
-
 		client := &http.Client{}
 		req, err := http.NewRequest("GET", projId, nil)
 		req.Header.Add("X-Access-Token", token)
@@ -294,6 +309,7 @@ func getTestsFromApi() []ScriptTests {
 			if err != nil {
 				log.Fatal(err)
 			}
+
 		}
 	}
 	return result
@@ -304,13 +320,14 @@ func getBuildsFromApi() []ScriptBuilds {
 	var result []ScriptBuilds
 
 	token = USERNAME + ":" + getAuthToken()
-
+	url := setUrl() + PROJECTPATH + "/"
 	testsBody := getTestsFromApi()
+
 	for _, data := range testsBody {
 		testId := data.Id
 		projId := data.ProjectId
+		id := url + projId + "/tests/" + testId + "/builds"
 
-		id := "http://ec2-52-37-174-113.us-west-2.compute.amazonaws.com:8082/api/projects/" + projId + "/tests/" + testId + "/builds"
 		client := &http.Client{}
 		req, err := http.NewRequest("GET", id, nil)
 		req.Header.Add("X-Access-Token", token)
@@ -318,6 +335,7 @@ func getBuildsFromApi() []ScriptBuilds {
 		if err != nil {
 			log.Fatal(err)
 		} else {
+
 			myResult := []ScriptBuilds{}
 
 			defer response.Body.Close()
@@ -330,7 +348,6 @@ func getBuildsFromApi() []ScriptBuilds {
 		}
 	}
 	return result
-
 }
 
 func getResultsFromApi() []ScriptBuildResults {
@@ -338,13 +355,14 @@ func getResultsFromApi() []ScriptBuildResults {
 	var result []ScriptBuildResults
 
 	token = USERNAME + ":" + getAuthToken()
-
+	url := setUrl() + PROJECTPATH + "/"
 	buildsBody := getBuildsFromApi()
 	for _, data := range buildsBody {
 		testId := data.TestId
 		projId := data.ProjectId
 		buildId := data.Id
-		id := "http://ec2-52-37-174-113.us-west-2.compute.amazonaws.com:8082/api/projects/" + projId + "/tests/" + testId + "/builds/" + buildId + "/results"
+		id := url + projId + "/tests/" + testId + "/builds/" + buildId + "/results"
+
 		client := &http.Client{}
 		req, err := http.NewRequest("GET", id, nil)
 		req.Header.Add("X-Access-Token", token)
@@ -367,13 +385,14 @@ func getResultsFromApi() []ScriptBuildResults {
 
 }
 
-func getRegistriesFromAPi() []byte {
+func getRegistriesFromAPi() []ScriptRegistries {
 	var body2 []byte
 
-	token = "admin" + ":" + getAuthToken()
-	projId := "http://ec2-52-37-174-113.us-west-2.compute.amazonaws.com:8082/api/registries"
+	token = USERNAME + ":" + getAuthToken()
+	url := setUrl() + REGISTRYPATH
+
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", projId, nil)
+	req, err := http.NewRequest("GET", url, nil)
 	req.Header.Add("X-Access-Token", token)
 	response, err := client.Do(req)
 	if err != nil {
@@ -385,8 +404,42 @@ func getRegistriesFromAPi() []byte {
 			log.Fatal(err)
 		}
 	}
-	return body2
+	myResult := []ScriptRegistries{}
+	json.Unmarshal(body2, &myResult)
 
+	return myResult
+}
+
+func getImagesFromRegistriesApi() []ScriptRepository {
+
+	var result []ScriptRepository
+	var body2 []byte
+	token = USERNAME + ":" + getAuthToken()
+	url := setUrl() + "/api/registries/"
+	body := getRegistriesFromAPi()
+
+	for _, data := range body {
+		projId := url + data.Id + "/repositories"
+		client := &http.Client{}
+		req, err := http.NewRequest("GET", projId, nil)
+		req.Header.Add("X-Access-Token", token)
+		response, err := client.Do(req)
+		if err != nil {
+			log.Fatal(err)
+		} else {
+			myResult := []ScriptRepository{}
+
+			defer response.Body.Close()
+			body2, err = ioutil.ReadAll(response.Body)
+			json.Unmarshal(body2, &myResult)
+			result = append(result, myResult...)
+
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+	return result
 }
 
 func unmarshalProjects(body []byte) []ScriptProjects {
@@ -398,22 +451,25 @@ func unmarshalProjects(body []byte) []ScriptProjects {
 }
 
 func setStatistics(stats SenderStatistics) SenderStatistics {
+
 	uname := "admin"
-	acc := unmarshalAccounts(getAccountsfromApi())
 	img := getImagesfromApi()
+	acc := unmarshalAccounts(getAccountsfromApi())
 	proj := unmarshalProjects(getProjectsfromApi())
 	tst := getTestsFromApi()
-	reg := unmarshalRegistries(getRegistriesFromAPi())
+	reg := getRegistriesFromAPi()
 	bld := getBuildsFromApi()
 	res := getResultsFromApi()
+	repo := getImagesFromRegistriesApi()
 	stats.Username = uname
-	stats.Accounts = acc
 	stats.Images = img
+	stats.Accounts = acc
 	stats.Projects = proj
 	stats.Tests = tst
 	stats.Registries = reg
 	stats.Builds = bld
 	stats.Results = res
+	stats.Repositories = repo
 	return stats
 }
 
@@ -424,10 +480,9 @@ func postResponse() {
 
 	json.NewEncoder(b).Encode(s)
 	res1, _ := http.Post("https://httpbin.org/post", "application/json; charset=utf-8", b)
+	//res1, _ := http.Post("http://16.51.182.155:8080/statistics", "application/json; charset=utf-8", b)
 	io.Copy(os.Stdout, res1.Body)
 }
-
-type Countries []ScriptBuildResults
 
 func main() {
 	postResponse()
