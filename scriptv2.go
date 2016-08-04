@@ -67,13 +67,14 @@ type Results struct {
 	ResultEntries []string
 }
 type ScriptProjects struct {
+	Id           string
 	Name         string
 	Author       string
 	CreationTime string
 	LastRunTime  string
 	Status       string
-	Images       []*ScriptImageDetails
-	Tests        []*ScriptTests
+	Images       []ScriptImageDetails
+	Tests        []ScriptTests
 }
 
 type ScriptAccounts struct {
@@ -86,6 +87,7 @@ type ScriptAccounts struct {
 }
 
 type ScriptImageDetails struct {
+	ProjectId      string
 	Id             string
 	Name           string
 	ImageId        string
@@ -96,8 +98,6 @@ type ScriptImageDetails struct {
 	IlmTags        []string
 	Location       string
 	SkipImageBuild string
-
-	ProjectId string
 }
 
 type ScriptRepository struct {
@@ -142,9 +142,6 @@ type ScriptBuildResults struct {
 	ResultEntries []string
 }
 
-var projectInfo []ScriptProjects
-var registryInfo []ScriptRegistries
-var accountInfo []ScriptAccounts
 var token string
 var credentials Credentials
 
@@ -182,16 +179,6 @@ func parseAuthResponse(body []byte) (string, error) {
 	return result, err
 }
 
-func getIdList(body []byte) []ScriptId {
-	var s []ScriptId
-	err := json.Unmarshal(body, &s)
-	if err != nil {
-		fmt.Println(err)
-	}
-	return s
-
-}
-
 func marshalOb(v interface{}) string {
 	vBytes, _ := json.Marshal(v)
 	return string(vBytes)
@@ -203,9 +190,9 @@ func getAuthToken() string {
 	x := string(s)
 	return x
 }
-func getAccountsfromApi() []byte {
+func getAccountsfromApi() []ScriptAccounts {
 	var body []byte
-
+	var accounts []ScriptAccounts
 	token = USERNAME + ":" + getAuthToken()
 	url := setUrl() + ACCOUNTPATH
 	client := &http.Client{}
@@ -221,19 +208,13 @@ func getAccountsfromApi() []byte {
 			log.Fatal(err)
 		}
 	}
-	return body
+	json.Unmarshal(body, &accounts)
+	return accounts
 }
 
-func unmarshalAccounts(body []byte) []ScriptAccounts {
-	error := json.Unmarshal(body, &accountInfo)
-	if error != nil {
-		fmt.Println("error:", error)
-	}
-	return accountInfo
-}
-
-func getProjectsfromApi() []byte {
+func getProjectsfromApi() []ScriptProjects {
 	var body []byte
+	projects := []ScriptProjects{}
 	token = USERNAME + ":" + getAuthToken()
 	url := setUrl() + PROJECTPATH
 	client := &http.Client{}
@@ -250,7 +231,8 @@ func getProjectsfromApi() []byte {
 			log.Fatal(err)
 		}
 	}
-	return body
+	json.Unmarshal(body, &projects)
+	return projects
 }
 
 func getImagesfromApi() []ScriptImageDetails {
@@ -259,12 +241,13 @@ func getImagesfromApi() []ScriptImageDetails {
 	token = USERNAME + ":" + getAuthToken()
 	url := setUrl() + PROJECTPATH + "/"
 
-	body := getProjectsfromApi()
-	s := getIdList(body)
-	for _, data := range s {
-		projId := url + data.Id + "/images"
+	projects := getProjectsfromApi()
+
+	for _, project := range projects {
+		path := url + project.Id + "/images"
+
 		client := &http.Client{}
-		req, err := http.NewRequest("GET", projId, nil)
+		req, err := http.NewRequest("GET", path, nil)
 		req.Header.Add("X-Access-Token", token)
 		response, err := client.Do(req)
 		if err != nil {
@@ -273,11 +256,70 @@ func getImagesfromApi() []ScriptImageDetails {
 			myResult := []ScriptImageDetails{}
 			defer response.Body.Close()
 			body2, err = ioutil.ReadAll(response.Body)
+
 			json.Unmarshal(body2, &myResult)
 			result = append(result, myResult...)
+
 			if err != nil {
 				log.Fatal(err)
 			}
+		}
+	}
+	return result
+}
+
+func getImagesFromAProject(project ScriptProjects) []ScriptImageDetails {
+	var result []ScriptImageDetails
+	var body2 []byte
+	token = USERNAME + ":" + getAuthToken()
+	url := setUrl() + PROJECTPATH + "/"
+
+	path := url + project.Id + "/images"
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", path, nil)
+	req.Header.Add("X-Access-Token", token)
+	response, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		myResult := []ScriptImageDetails{}
+		defer response.Body.Close()
+		body2, err = ioutil.ReadAll(response.Body)
+
+		json.Unmarshal(body2, &myResult)
+		result = append(result, myResult...)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	return result
+}
+
+func getTestsFromAProject(project ScriptProjects) []ScriptTests {
+	var result []ScriptTests
+	var body2 []byte
+	token = USERNAME + ":" + getAuthToken()
+	url := setUrl() + PROJECTPATH + "/"
+	path := url + project.Id + "/tests"
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", path, nil)
+	req.Header.Add("X-Access-Token", token)
+	response, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		myResult := []ScriptTests{}
+		defer response.Body.Close()
+		body2, err = ioutil.ReadAll(response.Body)
+
+		json.Unmarshal(body2, &myResult)
+		result = append(result, myResult...)
+
+		if err != nil {
+			log.Fatal(err)
 		}
 	}
 	return result
@@ -289,9 +331,8 @@ func getTestsFromApi() []ScriptTests {
 	token = USERNAME + ":" + getAuthToken()
 	url := setUrl() + PROJECTPATH + "/"
 	body := getProjectsfromApi()
-	s := getIdList(body)
 
-	for _, data := range s {
+	for _, data := range body {
 		projId := url + data.Id + "/tests"
 		client := &http.Client{}
 		req, err := http.NewRequest("GET", projId, nil)
@@ -309,7 +350,6 @@ func getTestsFromApi() []ScriptTests {
 			if err != nil {
 				log.Fatal(err)
 			}
-
 		}
 	}
 	return result
@@ -353,6 +393,7 @@ func getBuildsFromApi() []ScriptBuilds {
 func getResultsFromApi() []ScriptBuildResults {
 	var body2 []byte
 	var result []ScriptBuildResults
+	myResult := []ScriptBuildResults{}
 
 	token = USERNAME + ":" + getAuthToken()
 	url := setUrl() + PROJECTPATH + "/"
@@ -370,7 +411,6 @@ func getResultsFromApi() []ScriptBuildResults {
 		if err != nil {
 			log.Fatal(err)
 		} else {
-			myResult := []ScriptBuildResults{}
 
 			defer response.Body.Close()
 			body2, err = ioutil.ReadAll(response.Body)
@@ -378,13 +418,11 @@ func getResultsFromApi() []ScriptBuildResults {
 				log.Fatal(err)
 			}
 			json.Unmarshal(body2, &myResult)
-			result = append(result, myResult...)
 		}
 	}
 	return result
 
 }
-
 func getRegistriesFromAPi() []ScriptRegistries {
 	var body2 []byte
 
@@ -442,30 +480,30 @@ func getImagesFromRegistriesApi() []ScriptRepository {
 	return result
 }
 
-func unmarshalProjects(body []byte) []ScriptProjects {
-	error := json.Unmarshal(body, &projectInfo)
-	if error != nil {
-		fmt.Println("error:", error)
-	}
-	return projectInfo
-}
-
 func setStatistics(stats SenderStatistics) SenderStatistics {
-
 	uname := "admin"
-	img := getImagesfromApi()
-	acc := unmarshalAccounts(getAccountsfromApi())
-	proj := unmarshalProjects(getProjectsfromApi())
-	tst := getTestsFromApi()
+	var result []ScriptProjects
+	projects := getProjectsfromApi()
+	for _, proj := range projects {
+		img := getImagesFromAProject(proj)
+		tst := getTestsFromAProject(proj)
+		proj.Images = img
+		proj.Tests = tst
+		result = append(result, proj)
+	}
+	stats.Projects = result
+
+	imgs := getImagesfromApi()
+	acc := getAccountsfromApi()
+	tsts := getTestsFromApi()
 	reg := getRegistriesFromAPi()
 	bld := getBuildsFromApi()
 	res := getResultsFromApi()
 	repo := getImagesFromRegistriesApi()
 	stats.Username = uname
-	stats.Images = img
 	stats.Accounts = acc
-	stats.Projects = proj
-	stats.Tests = tst
+	stats.Images = imgs
+	stats.Tests = tsts
 	stats.Registries = reg
 	stats.Builds = bld
 	stats.Results = res
@@ -486,4 +524,5 @@ func postResponse() {
 
 func main() {
 	postResponse()
+	//fmt.Printf("%v\n", getImagesfromApi())
 }
